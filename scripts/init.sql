@@ -55,3 +55,12 @@ CREATE TABLE IF NOT EXISTS log_config (
     max_body_size INTEGER DEFAULT 2048,
     only_error INTEGER DEFAULT 0
 );
+
+-- 熔断器配置表
+CREATE TABLE IF NOT EXISTS circuit_breaker_config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER UNIQUE,
+    max_failures INTEGER DEFAULT 5,
+    reset_timeout INTEGER DEFAULT 30,
+    half_open_max_test INTEGER DEFAULT 1
+);

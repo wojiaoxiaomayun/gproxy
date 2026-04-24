@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"gproxy/internal/breaker"
 	"gproxy/internal/model"
 	"gproxy/internal/ratelimit"
 )
@@ -54,6 +55,12 @@ type ConfigCache struct {
 
 	// 分组配置映射: groupId -> qps/burst
 	rateLimitConfigs map[int64]*model.RateLimitConfig
+
+	// 熔断器配置映射: groupId -> CircuitBreakerConfig
+	circuitBreakerConfigs map[int64]*model.CircuitBreakerConfig
+
+	// 熔断器实例映射: groupId -> CircuitBreaker
+	circuitBreakers map[int64]*breaker.CircuitBreaker
 }
 
 var (
@@ -65,11 +72,13 @@ var (
 func GetGlobalCache() *ConfigCache {
 	once.Do(func() {
 		globalCache = &ConfigCache{
-			apiKeys:          make(map[string]*ApiKeyConfig),
-			rateLimiters:     make(map[int64]ratelimit.RateLimiter),
-			upstreams:        make(map[int64][]*UpstreamConfig),
-			logConfigs:       make(map[int64]*LogConfigCache),
-			rateLimitConfigs: make(map[int64]*model.RateLimitConfig),
+			apiKeys:               make(map[string]*ApiKeyConfig),
+			rateLimiters:          make(map[int64]ratelimit.RateLimiter),
+			upstreams:             make(map[int64][]*UpstreamConfig),
+			logConfigs:            make(map[int64]*LogConfigCache),
+			rateLimitConfigs:      make(map[int64]*model.RateLimitConfig),
+			circuitBreakerConfigs: make(map[int64]*model.CircuitBreakerConfig),
+			circuitBreakers:       make(map[int64]*breaker.CircuitBreaker),
 		}
 	})
 	return globalCache
@@ -80,12 +89,12 @@ func (c *ConfigCache) Load() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// 清空旧数据
+	// 清空旧数据（但不清空限流器和熔断器，因为它们有状态）
 	c.apiKeys = make(map[string]*ApiKeyConfig)
-	c.rateLimiters = make(map[int64]ratelimit.RateLimiter)
 	c.upstreams = make(map[int64][]*UpstreamConfig)
 	c.logConfigs = make(map[int64]*LogConfigCache)
-	c.rateLimitConfigs = make(map[int64]*model.RateLimitConfig)
+	// 注意：不清空 rateLimiters, rateLimitConfigs, circuitBreakerConfigs 和 circuitBreakers
+	// 它们在各自的 load 方法中处理
 
 	// 加载 API Keys
 	if err := c.loadApiKeys(); err != nil {
@@ -107,8 +116,13 @@ func (c *ConfigCache) Load() error {
 		return err
 	}
 
-	log.Printf("Config cache loaded: %d api_keys, %d rate_limiters, %d upstreams, %d log_configs",
-		len(c.apiKeys), len(c.rateLimiters), len(c.upstreams), len(c.logConfigs))
+	// 加载熔断器配置
+	if err := c.loadCircuitBreakerConfigs(); err != nil {
+		return err
+	}
+
+	log.Printf("Config cache loaded: %d api_keys, %d rate_limiters, %d upstreams, %d log_configs, %d circuit_breakers",
+		len(c.apiKeys), len(c.rateLimiters), len(c.upstreams), len(c.logConfigs), len(c.circuitBreakers))
 
 	return nil
 }
@@ -140,25 +154,57 @@ func (c *ConfigCache) loadRateLimitConfigs() error {
 		return err
 	}
 
+	// 记录新配置的 GroupID
+	newGroupIDs := make(map[int64]bool)
+
 	for _, cfg := range configs {
-		c.rateLimitConfigs[cfg.GroupID] = &cfg
+		newGroupIDs[cfg.GroupID] = true
 		
-		// 根据配置选择限流器类型
-		if cfg.EnableMultiWindow == 1 {
-			// 启用多窗口限流器
-			c.rateLimiters[cfg.GroupID] = ratelimit.NewMultiWindowLimiter(
-				cfg.QPS,
-				cfg.Burst,
-				cfg.RPM,
-				cfg.RPH,
-			)
-			log.Printf("Group %d: Multi-window limiter (QPS=%d, Burst=%d, RPM=%d, RPH=%d)",
-				cfg.GroupID, cfg.QPS, cfg.Burst, cfg.RPM, cfg.RPH)
-		} else {
-			// 使用简单限流器
-			c.rateLimiters[cfg.GroupID] = ratelimit.NewSimpleLimiter(cfg.QPS, cfg.Burst)
-			log.Printf("Group %d: Simple limiter (QPS=%d, Burst=%d)",
-				cfg.GroupID, cfg.QPS, cfg.Burst)
+		// 检查是否已存在限流器
+		existingLimiter := c.rateLimiters[cfg.GroupID]
+		existingConfig := c.rateLimitConfigs[cfg.GroupID]
+		
+		// 判断配置是否变化
+		configChanged := existingConfig == nil ||
+			existingConfig.QPS != cfg.QPS ||
+			existingConfig.Burst != cfg.Burst ||
+			existingConfig.EnableMultiWindow != cfg.EnableMultiWindow ||
+			existingConfig.RPM != cfg.RPM ||
+			existingConfig.RPH != cfg.RPH
+		
+		// 只有配置变化时才重新创建限流器
+		if configChanged {
+			c.rateLimitConfigs[cfg.GroupID] = &cfg
+			
+			// 根据配置选择限流器类型
+			if cfg.EnableMultiWindow == 1 {
+				// 启用多窗口限流器
+				c.rateLimiters[cfg.GroupID] = ratelimit.NewMultiWindowLimiter(
+					cfg.QPS,
+					cfg.Burst,
+					cfg.RPM,
+					cfg.RPH,
+				)
+				log.Printf("Group %d: Multi-window limiter updated (QPS=%d, Burst=%d, RPM=%d, RPH=%d)",
+					cfg.GroupID, cfg.QPS, cfg.Burst, cfg.RPM, cfg.RPH)
+			} else {
+				// 使用简单限流器
+				c.rateLimiters[cfg.GroupID] = ratelimit.NewSimpleLimiter(cfg.QPS, cfg.Burst)
+				log.Printf("Group %d: Simple limiter updated (QPS=%d, Burst=%d)",
+					cfg.GroupID, cfg.QPS, cfg.Burst)
+			}
+		} else if existingLimiter != nil {
+			// 配置未变化，保留现有限流器实例
+			c.rateLimitConfigs[cfg.GroupID] = &cfg
+		}
+	}
+
+	// 删除不再存在的限流器
+	for groupID := range c.rateLimiters {
+		if !newGroupIDs[groupID] {
+			delete(c.rateLimiters, groupID)
+			delete(c.rateLimitConfigs, groupID)
+			log.Printf("Group %d: Rate limiter removed", groupID)
 		}
 	}
 
@@ -282,4 +328,66 @@ func (c *ConfigCache) StartReloader(interval time.Duration) {
 		}
 	}()
 	log.Printf("Config reloader started (interval: %v)", interval)
+}
+
+// loadCircuitBreakerConfigs 加载熔断器配置并创建熔断器
+func (c *ConfigCache) loadCircuitBreakerConfigs() error {
+	var configs []model.CircuitBreakerConfig
+	if err := model.DB.Find(&configs).Error; err != nil {
+		return err
+	}
+
+	// 记录新配置的 GroupID
+	newGroupIDs := make(map[int64]bool)
+
+	for _, cfg := range configs {
+		newGroupIDs[cfg.GroupID] = true
+		
+		// 检查是否已存在熔断器
+		existingCB := c.circuitBreakers[cfg.GroupID]
+		existingConfig := c.circuitBreakerConfigs[cfg.GroupID]
+		
+		// 判断配置是否变化
+		configChanged := existingConfig == nil ||
+			existingConfig.MaxFailures != cfg.MaxFailures ||
+			existingConfig.ResetTimeout != cfg.ResetTimeout ||
+			existingConfig.HalfOpenMaxTest != cfg.HalfOpenMaxTest
+		
+		// 只有配置变化时才重新创建熔断器
+		if configChanged {
+			c.circuitBreakerConfigs[cfg.GroupID] = &cfg
+			halfOpenMaxTest := cfg.HalfOpenMaxTest
+			if halfOpenMaxTest < 1 {
+				halfOpenMaxTest = 1
+			}
+			c.circuitBreakers[cfg.GroupID] = breaker.NewCircuitBreakerWithConfig(
+				cfg.MaxFailures,
+				time.Duration(cfg.ResetTimeout)*time.Second,
+				halfOpenMaxTest,
+			)
+			log.Printf("Group %d: Circuit breaker updated (MaxFailures=%d, ResetTimeout=%ds, HalfOpenMaxTest=%d)",
+				cfg.GroupID, cfg.MaxFailures, cfg.ResetTimeout, halfOpenMaxTest)
+		} else if existingCB != nil {
+			// 配置未变化，保留现有熔断器实例
+			c.circuitBreakerConfigs[cfg.GroupID] = &cfg
+		}
+	}
+
+	// 删除不再存在的熔断器
+	for groupID := range c.circuitBreakers {
+		if !newGroupIDs[groupID] {
+			delete(c.circuitBreakers, groupID)
+			delete(c.circuitBreakerConfigs, groupID)
+			log.Printf("Group %d: Circuit breaker removed", groupID)
+		}
+	}
+
+	return nil
+}
+
+// GetCircuitBreaker 获取熔断器（读锁）
+func (c *ConfigCache) GetCircuitBreaker(groupID int64) *breaker.CircuitBreaker {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.circuitBreakers[groupID]
 }

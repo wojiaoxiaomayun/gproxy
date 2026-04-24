@@ -88,6 +88,19 @@ func (LogConfig) TableName() string {
 	return "log_config"
 }
 
+// CircuitBreakerConfig 熔断器配置
+type CircuitBreakerConfig struct {
+	ID              int64 `gorm:"primaryKey;autoIncrement" json:"id"`
+	GroupID         int64 `gorm:"uniqueIndex" json:"group_id"`
+	MaxFailures     int   `gorm:"default:5" json:"max_failures"`       // 最大失败次数
+	ResetTimeout    int   `gorm:"default:30" json:"reset_timeout"`     // 重置超时时间(秒)
+	HalfOpenMaxTest int   `gorm:"default:1" json:"half_open_max_test"` // 半开状态最大测试请求数
+}
+
+func (CircuitBreakerConfig) TableName() string {
+	return "circuit_breaker_config"
+}
+
 // API Keys 操作
 func GetAllApiKeys() ([]ApiKey, error) {
 	var keys []ApiKey
@@ -246,4 +259,43 @@ func UpdateLogConfig(projectID int64, config *LogConfig) error {
 	}
 	// 存在则更新
 	return DB.Model(&LogConfig{}).Where("project_id = ?", projectID).Updates(config).Error
+}
+
+// CircuitBreakerConfig 操作
+func GetAllCircuitBreakerConfigs() ([]CircuitBreakerConfig, error) {
+	var configs []CircuitBreakerConfig
+	err := DB.Find(&configs).Error
+	return configs, err
+}
+
+func GetCircuitBreakerConfigByGroupID(groupID int64) (*CircuitBreakerConfig, error) {
+	var config CircuitBreakerConfig
+	err := DB.Where("group_id = ?", groupID).First(&config).Error
+	if err != nil {
+		return nil, err
+	}
+	return &config, nil
+}
+
+func CreateCircuitBreakerConfig(config *CircuitBreakerConfig) error {
+	return DB.Create(config).Error
+}
+
+func UpdateCircuitBreakerConfig(groupID int64, config *CircuitBreakerConfig) error {
+	// 先查找是否存在
+	var existing CircuitBreakerConfig
+	err := DB.Where("group_id = ?", groupID).First(&existing).Error
+	if err != nil {
+		// 不存在则创建
+		config.GroupID = groupID
+		return DB.Create(config).Error
+	}
+	// 存在则更新，使用 Select 明确指定要更新的字段（包括零值）
+	return DB.Model(&CircuitBreakerConfig{}).Where("group_id = ?", groupID).
+		Select("max_failures", "reset_timeout", "enable_half_open", "half_open_max_test").
+		Updates(config).Error
+}
+
+func DeleteCircuitBreakerConfig(groupID int64) error {
+	return DB.Where("group_id = ?", groupID).Delete(&CircuitBreakerConfig{}).Error
 }

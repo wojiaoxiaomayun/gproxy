@@ -31,6 +31,7 @@ func InitDB(dbPath string) error {
 		&Group{},
 		&RateLimitConfig{},
 		&LogConfig{},
+		&CircuitBreakerConfig{},
 	)
 	if err != nil {
 		return fmt.Errorf("failed to migrate database: %w", err)

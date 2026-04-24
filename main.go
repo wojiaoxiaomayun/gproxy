@@ -385,6 +385,84 @@ func main() {
 			c.JSON(200, config)
 		})
 
+		// 熔断器配置管理
+		admin.GET("/circuit-breaker-configs", func(c *gin.Context) {
+			configs, err := model.GetAllCircuitBreakerConfigs()
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, configs)
+		})
+
+		admin.GET("/circuit-breaker-config/:group_id", func(c *gin.Context) {
+			groupID := c.Param("group_id")
+			var id int64
+			if _, err := fmt.Sscanf(groupID, "%d", &id); err != nil {
+				c.JSON(400, gin.H{"error": "invalid group_id"})
+				return
+			}
+			config, err := model.GetCircuitBreakerConfigByGroupID(id)
+			if err != nil {
+				c.JSON(404, gin.H{"error": "not found"})
+				return
+			}
+			c.JSON(200, config)
+		})
+
+		admin.PUT("/circuit-breaker-config/:group_id", func(c *gin.Context) {
+			groupID := c.Param("group_id")
+			var id int64
+			if _, err := fmt.Sscanf(groupID, "%d", &id); err != nil {
+				c.JSON(400, gin.H{"error": "invalid group_id"})
+				return
+			}
+			var config model.CircuitBreakerConfig
+			if err := c.ShouldBindJSON(&config); err != nil {
+				c.JSON(400, gin.H{"error": err.Error()})
+				return
+			}
+			if err := model.UpdateCircuitBreakerConfig(id, &config); err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, config)
+		})
+
+		admin.DELETE("/circuit-breaker-config/:group_id", func(c *gin.Context) {
+			groupID := c.Param("group_id")
+			var id int64
+			if _, err := fmt.Sscanf(groupID, "%d", &id); err != nil {
+				c.JSON(400, gin.H{"error": "invalid group_id"})
+				return
+			}
+			if err := model.DeleteCircuitBreakerConfig(id); err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, gin.H{"message": "deleted"})
+		})
+
+		// 熔断器状态查询（调试用）
+		admin.GET("/circuit-breaker-status/:group_id", func(c *gin.Context) {
+			groupID := c.Param("group_id")
+			var id int64
+			if _, err := fmt.Sscanf(groupID, "%d", &id); err != nil {
+				c.JSON(400, gin.H{"error": "invalid group_id"})
+				return
+			}
+			cb := configCache.GetCircuitBreaker(id)
+			if cb == nil {
+				c.JSON(404, gin.H{"error": "circuit breaker not found"})
+				return
+			}
+			c.JSON(200, gin.H{
+				"group_id": id,
+				"state":    cb.GetState(),
+				"debug":    cb.GetDebugInfo(),
+			})
+		})
+
 		// 日志查询
 		admin.GET("/logs", func(c *gin.Context) {
 			logs := logCollector.GetRecentLogs(100)
