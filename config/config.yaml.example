@@ -1,0 +1,19 @@
+server:
+  port: 8080
+  mode: release # debug, release
+
+database:
+  path: ./data/gateway.db
+
+log:
+  buffer_size: 1000
+  worker_pool: 3
+
+cache:
+  reload_interval: 5s
+
+# Elasticsearch配置（预留）
+elasticsearch:
+  enabled: false
+  url: http://localhost:9200
+  index_prefix: gateway-logs
