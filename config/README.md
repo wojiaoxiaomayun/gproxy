@@ -22,22 +22,27 @@ database:
 ### Log 配置
 ```yaml
 log:
-  buffer_size: 1000  # 日志缓冲区大小
-  worker_pool: 3     # 日志处理工作协程数
+  buffer_size: 1000                # 日志缓冲区大小
+  worker_pool: 3                   # 日志处理工作协程数
+  file_path: ./logs/gateway.log    # 日志文件路径
+  max_size: 100                    # 单个日志文件最大大小(MB)
+  max_backups: 10                  # 保留的旧日志文件数量
+  max_age: 30                      # 保留旧日志文件的最大天数
+  compress: true                   # 是否压缩旧日志文件
 ```
+
+日志文件会自动按大小和时间轮转：
+- 当日志文件达到 `max_size` 时自动切割
+- 保留最近 `max_backups` 个备份文件
+- 删除超过 `max_age` 天的旧日志
+- 旧日志文件可选择 gzip 压缩以节省空间
+
+日志格式为 JSON，每行一条记录，便于 Filebeat 等工具采集。
 
 ### Cache 配置
 ```yaml
 cache:
   reload_interval: 5s  # 配置缓存重载间隔（支持 s/m/h 单位）
-```
-
-### Elasticsearch 配置（预留）
-```yaml
-elasticsearch:
-  enabled: false                    # 是否启用 ES 日志存储
-  url: http://localhost:9200        # ES 服务地址
-  index_prefix: gateway-logs        # 索引前缀
 ```
 
 ## 配置文件位置

@@ -49,7 +49,15 @@ func main() {
 	configCache.StartReloader(cfg.GetReloadInterval())
 
 	// 初始化日志收集器
-	logCollector := logger.NewLogCollector(cfg.Log.BufferSize, cfg.Log.WorkerPool)
+	logCollector := logger.NewLogCollector(
+		cfg.Log.BufferSize,
+		cfg.Log.WorkerPool,
+		cfg.Log.FilePath,
+		cfg.Log.MaxSize,
+		cfg.Log.MaxBackups,
+		cfg.Log.MaxAge,
+		cfg.Log.Compress,
+	)
 	logCollector.Start()
 	defer logCollector.Stop()
 
@@ -360,8 +368,14 @@ func main() {
 			}
 			config, err := model.GetLogConfigByProject(id)
 			if err != nil {
-				c.JSON(404, gin.H{"error": "not found"})
-				return
+				// 如果配置不存在，返回默认配置
+				config = &model.LogConfig{
+					ProjectID:             id,
+					EnableBody:            0,
+					BodyRecordThresholdMs: 500,
+					MaxBodySize:           2048,
+					OnlyError:             0,
+				}
 			}
 			c.JSON(200, config)
 		})

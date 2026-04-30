@@ -8,12 +8,11 @@ database:
 log:
   buffer_size: 1000
   worker_pool: 3
+  file_path: ./logs/gateway.log  # 日志文件路径
+  max_size: 100                  # 单个日志文件最大大小(MB)
+  max_backups: 10                # 保留的旧日志文件数量
+  max_age: 30                    # 保留旧日志文件的最大天数
+  compress: true                 # 是否压缩旧日志文件
 
 cache:
   reload_interval: 5s
-
-# Elasticsearch配置（预留）
-elasticsearch:
-  enabled: false
-  url: http://localhost:9200
-  index_prefix: gateway-logs

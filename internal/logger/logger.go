@@ -2,9 +2,14 @@ package logger
 
 import (
 	"encoding/json"
+	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
+
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 // LogEntry 日志条目
@@ -34,16 +39,34 @@ type LogCollector struct {
 	recentLogs []*LogEntry
 	logsMutex  sync.RWMutex
 	maxRecent  int
+	fileWriter io.Writer
 }
 
 // NewLogCollector 创建日志收集器
-func NewLogCollector(bufferSize int, workerPool int) *LogCollector {
+func NewLogCollector(bufferSize int, workerPool int, logFilePath string, maxSize, maxBackups, maxAge int, compress bool) *LogCollector {
+	// 确保日志目录存在
+	logDir := filepath.Dir(logFilePath)
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		log.Printf("Failed to create log directory: %v", err)
+	}
+
+	// 配置 lumberjack 日志轮转
+	fileWriter := &lumberjack.Logger{
+		Filename:   logFilePath,
+		MaxSize:    maxSize,    // MB
+		MaxBackups: maxBackups, // 保留的旧日志文件数量
+		MaxAge:     maxAge,     // 天
+		Compress:   compress,   // 是否压缩
+		LocalTime:  true,       // 使用本地时间
+	}
+
 	return &LogCollector{
 		logChan:    make(chan *LogEntry, bufferSize),
 		workerPool: workerPool,
 		stopChan:   make(chan struct{}),
 		recentLogs: make([]*LogEntry, 0, 1000),
 		maxRecent:  1000,
+		fileWriter: fileWriter,
 	}
 }
 
@@ -93,16 +116,20 @@ func (lc *LogCollector) worker(id int) {
 	}
 }
 
-// writeBatch 批量写入日志（预留接口）
+// writeBatch 批量写入日志到文件
 func (lc *LogCollector) writeBatch(batch []*LogEntry) {
-	// TODO: 实现写入Elasticsearch的逻辑
-	// 这里先打印到控制台
 	for _, entry := range batch {
-		data, _ := json.Marshal(entry)
-		log.Printf("[LOG] %s", string(data))
+		data, err := json.Marshal(entry)
+		if err != nil {
+			log.Printf("Failed to marshal log entry: %v", err)
+			continue
+		}
+		
+		// 写入文件
+		if _, err := lc.fileWriter.Write(append(data, '\n')); err != nil {
+			log.Printf("Failed to write log to file: %v", err)
+		}
 	}
-	
-	log.Printf("Batch written: %d logs", len(batch))
 }
 
 // Collect 收集日志（异步）

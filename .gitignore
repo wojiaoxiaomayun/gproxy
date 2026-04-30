@@ -36,3 +36,4 @@ Thumbs.db
 # 忽略生成的配置文件，但保留配置目录结构
 config/config.yaml
 data
+logs

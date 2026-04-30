@@ -22,19 +22,18 @@ type Config struct {
 	} `yaml:"database"`
 
 	Log struct {
-		BufferSize int `yaml:"buffer_size"`
-		WorkerPool int `yaml:"worker_pool"`
+		BufferSize int    `yaml:"buffer_size"`
+		WorkerPool int    `yaml:"worker_pool"`
+		FilePath   string `yaml:"file_path"`   // 日志文件路径
+		MaxSize    int    `yaml:"max_size"`    // 单个日志文件最大大小(MB)
+		MaxBackups int    `yaml:"max_backups"` // 保留的旧日志文件数量
+		MaxAge     int    `yaml:"max_age"`     // 保留旧日志文件的最大天数
+		Compress   bool   `yaml:"compress"`    // 是否压缩旧日志文件
 	} `yaml:"log"`
 
 	Cache struct {
 		ReloadInterval string `yaml:"reload_interval"`
 	} `yaml:"cache"`
-
-	Elasticsearch struct {
-		Enabled     bool   `yaml:"enabled"`
-		URL         string `yaml:"url"`
-		IndexPrefix string `yaml:"index_prefix"`
-	} `yaml:"elasticsearch"`
 }
 
 var globalConfig *Config
@@ -97,14 +96,14 @@ func generateDefaultConfig(configPath string) error {
 	// Log 配置
 	defaultConfig.Log.BufferSize = 1000
 	defaultConfig.Log.WorkerPool = 3
+	defaultConfig.Log.FilePath = "./logs/gateway.log"
+	defaultConfig.Log.MaxSize = 100    // 100MB
+	defaultConfig.Log.MaxBackups = 10  // 保留10个备份
+	defaultConfig.Log.MaxAge = 30      // 保留30天
+	defaultConfig.Log.Compress = true  // 压缩旧日志
 
 	// Cache 配置
 	defaultConfig.Cache.ReloadInterval = "5s"
-
-	// Elasticsearch 配置
-	defaultConfig.Elasticsearch.Enabled = false
-	defaultConfig.Elasticsearch.URL = "http://localhost:9200"
-	defaultConfig.Elasticsearch.IndexPrefix = "gateway-logs"
 
 	// 序列化为 YAML
 	data, err := yaml.Marshal(&defaultConfig)
