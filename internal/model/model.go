@@ -299,3 +299,86 @@ func UpdateCircuitBreakerConfig(groupID int64, config *CircuitBreakerConfig) err
 func DeleteCircuitBreakerConfig(groupID int64) error {
 	return DB.Where("group_id = ?", groupID).Delete(&CircuitBreakerConfig{}).Error
 }
+
+// StatsRecord 统计记录表
+type StatsRecord struct {
+	ID             int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	Type           string    `gorm:"type:text;not null;index" json:"type"` // global, project, group, key
+	RefID          int64     `gorm:"index" json:"ref_id"`                  // 关联ID（项目ID或分组ID）
+	RefKey         string    `gorm:"type:text;index" json:"ref_key"`       // 关联Key（API Key）
+	PV             int64     `gorm:"not null" json:"pv"`                   // 请求总数
+	ActiveKeyCount int       `gorm:"default:0" json:"active_key_count"`    // 活跃Key数量
+	RecordTime     time.Time `gorm:"index" json:"record_time"`             // 记录时间
+}
+
+func (StatsRecord) TableName() string {
+	return "stats_record"
+}
+
+// SaveStatsRecord 保存统计记录
+func SaveStatsRecord(record *StatsRecord) error {
+	return DB.Create(record).Error
+}
+
+// GetLatestStatsRecord 获取最新的统计记录
+func GetLatestStatsRecord(statsType string, refID int64, refKey string) (*StatsRecord, error) {
+	var record StatsRecord
+	query := DB.Where("type = ?", statsType)
+	
+	if statsType == "project" || statsType == "group" {
+		query = query.Where("ref_id = ?", refID)
+	} else if statsType == "key" {
+		query = query.Where("ref_key = ?", refKey)
+	}
+	
+	err := query.Order("record_time DESC").First(&record).Error
+	if err != nil {
+		return nil, err
+	}
+	return &record, nil
+}
+
+// GetStatsRecordsByTimeRange 获取时间范围内的统计记录
+func GetStatsRecordsByTimeRange(statsType string, refID int64, refKey string, startTime, endTime time.Time) ([]StatsRecord, error) {
+	var records []StatsRecord
+	query := DB.Where("type = ? AND record_time BETWEEN ? AND ?", statsType, startTime, endTime)
+	
+	if statsType == "project" || statsType == "group" {
+		query = query.Where("ref_id = ?", refID)
+	} else if statsType == "key" {
+		query = query.Where("ref_key = ?", refKey)
+	}
+	
+	err := query.Order("record_time ASC").Find(&records).Error
+	return records, err
+}
+
+// GetAllLatestStatsByType 获取某个类型的所有最新统计记录
+func GetAllLatestStatsByType(statsType string) ([]StatsRecord, error) {
+	var records []StatsRecord
+	
+	// 使用子查询获取每个 ref_id/ref_key 的最新记录
+	if statsType == "project" || statsType == "group" {
+		err := DB.Raw(`
+			SELECT * FROM stats_record 
+			WHERE type = ? AND id IN (
+				SELECT MAX(id) FROM stats_record 
+				WHERE type = ? 
+				GROUP BY ref_id
+			)
+		`, statsType, statsType).Scan(&records).Error
+		return records, err
+	} else if statsType == "key" {
+		err := DB.Raw(`
+			SELECT * FROM stats_record 
+			WHERE type = ? AND id IN (
+				SELECT MAX(id) FROM stats_record 
+				WHERE type = ? 
+				GROUP BY ref_key
+			)
+		`, statsType, statsType).Scan(&records).Error
+		return records, err
+	}
+	
+	return records, nil
+}

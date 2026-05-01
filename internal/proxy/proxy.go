@@ -16,21 +16,24 @@ import (
 	"gproxy/internal/breaker"
 	"gproxy/internal/cache"
 	"gproxy/internal/logger"
+	"gproxy/internal/stats"
 
 	"github.com/gin-gonic/gin"
 )
 
 // ProxyHandler 反向代理处理器
 type ProxyHandler struct {
-	configCache *cache.ConfigCache
-	logCollector *logger.LogCollector
+	configCache    *cache.ConfigCache
+	logCollector   *logger.LogCollector
+	statsCollector *stats.StatsCollector
 }
 
 // NewProxyHandler 创建代理处理器
-func NewProxyHandler(configCache *cache.ConfigCache, logCollector *logger.LogCollector) *ProxyHandler {
+func NewProxyHandler(configCache *cache.ConfigCache, logCollector *logger.LogCollector, statsCollector *stats.StatsCollector) *ProxyHandler {
 	return &ProxyHandler{
-		configCache: configCache,
-		logCollector: logCollector,
+		configCache:    configCache,
+		logCollector:   logCollector,
+		statsCollector: statsCollector,
 	}
 }
 
@@ -133,6 +136,11 @@ func (h *ProxyHandler) Handle(c *gin.Context) {
 
 	// 计算耗时
 	costMs := time.Since(startTime).Milliseconds()
+
+	// 收集统计（在日志之前，确保统计不会丢失）
+	if h.statsCollector != nil {
+		h.statsCollector.Record(projectID.(int64), groupID.(int64), appKey.(string))
+	}
 
 	// 收集日志
 	h.collectLog(c, projectID.(int64), appKey.(string), groupID.(int64), 

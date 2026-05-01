@@ -14,6 +14,7 @@ import (
 	"gproxy/internal/middleware"
 	"gproxy/internal/model"
 	"gproxy/internal/proxy"
+	"gproxy/internal/stats"
 
 	"github.com/gin-gonic/gin"
 )
@@ -61,8 +62,13 @@ func main() {
 	logCollector.Start()
 	defer logCollector.Stop()
 
+	// 初始化统计收集器（每30秒持久化一次）
+	statsCollector := stats.NewStatsCollector(30 * time.Second)
+	statsCollector.Start()
+	defer statsCollector.Stop()
+
 	// 创建代理处理器
-	proxyHandler := proxy.NewProxyHandler(configCache, logCollector)
+	proxyHandler := proxy.NewProxyHandler(configCache, logCollector, statsCollector)
 
 	// 设置Gin模式
 	gin.SetMode(cfg.Server.Mode)
@@ -481,6 +487,73 @@ func main() {
 		admin.GET("/logs", func(c *gin.Context) {
 			logs := logCollector.GetRecentLogs(100)
 			c.JSON(200, logs)
+		})
+
+		// 统计接口 - 全局统计
+		admin.GET("/stats/global", func(c *gin.Context) {
+			stats := statsCollector.GetGlobalStats()
+			c.JSON(200, stats)
+		})
+
+		// 统计接口 - 所有项目统计
+		admin.GET("/stats/projects", func(c *gin.Context) {
+			projectStats := statsCollector.GetAllProjectStats()
+			c.JSON(200, projectStats)
+		})
+
+		// 统计接口 - 单个项目统计
+		admin.GET("/stats/project/:project_id", func(c *gin.Context) {
+			projectID := c.Param("project_id")
+			var id int64
+			if _, err := fmt.Sscanf(projectID, "%d", &id); err != nil {
+				c.JSON(400, gin.H{"error": "invalid project_id"})
+				return
+			}
+			stats := statsCollector.GetProjectStats(id)
+			if stats == nil {
+				c.JSON(404, gin.H{"error": "no stats found for this project"})
+				return
+			}
+			c.JSON(200, stats)
+		})
+
+		// 统计接口 - 所有分组统计
+		admin.GET("/stats/groups", func(c *gin.Context) {
+			groupStats := statsCollector.GetAllGroupStats()
+			c.JSON(200, groupStats)
+		})
+
+		// 统计接口 - 单个分组统计
+		admin.GET("/stats/group/:group_id", func(c *gin.Context) {
+			groupID := c.Param("group_id")
+			var id int64
+			if _, err := fmt.Sscanf(groupID, "%d", &id); err != nil {
+				c.JSON(400, gin.H{"error": "invalid group_id"})
+				return
+			}
+			stats := statsCollector.GetGroupStats(id)
+			if stats == nil {
+				c.JSON(404, gin.H{"error": "no stats found for this group"})
+				return
+			}
+			c.JSON(200, stats)
+		})
+
+		// 统计接口 - 所有 API Key 统计
+		admin.GET("/stats/keys", func(c *gin.Context) {
+			keyStats := statsCollector.GetAllKeyStats()
+			c.JSON(200, keyStats)
+		})
+
+		// 统计接口 - 单个 API Key 统计
+		admin.GET("/stats/key/:app_key", func(c *gin.Context) {
+			appKey := c.Param("app_key")
+			stats := statsCollector.GetKeyStats(appKey)
+			if stats == nil {
+				c.JSON(404, gin.H{"error": "no stats found for this key"})
+				return
+			}
+			c.JSON(200, stats)
 		})
 	}
 
