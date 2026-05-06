@@ -1,10 +1,14 @@
 package main
 
 import (
+	"embed"
 	"fmt"
+	"io/fs"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -19,6 +23,173 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+//go:embed web/out/*
+var webFS embed.FS
+
+// containsDot 检查路径是否包含点（用于判断是否是文件请求）
+func containsDot(path string) bool {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '.' {
+			return true
+		}
+		if path[i] == '/' {
+			return false
+		}
+	}
+	return false
+}
+
+// startWebServer 启动前端静态文件服务器（使用嵌入的文件系统）
+func startWebServer(port int) {
+	log.Printf("Starting embedded web server on port %d", port)
+
+	// 创建独立的 Gin 实例用于前端
+	gin.SetMode(gin.ReleaseMode)
+	webRouter := gin.New()
+	webRouter.Use(gin.Recovery())
+
+	// CORS 中间件
+	webRouter.Use(func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
+
+	// 获取嵌入的文件系统，去掉 "web/out" 前缀
+	webRoot, err := fs.Sub(webFS, "web/out")
+	if err != nil {
+		log.Printf("Failed to get embedded web filesystem: %v", err)
+		log.Println("Web server will not start")
+		return
+	}
+
+	// 静态资源
+	webRouter.StaticFS("/_next", http.FS(webRoot))
+	
+	// 处理 favicon
+	webRouter.GET("/favicon.ico", func(c *gin.Context) {
+		data, err := fs.ReadFile(webRoot, "favicon.ico")
+		if err != nil {
+			c.Status(404)
+			return
+		}
+		c.Data(200, "image/x-icon", data)
+	})
+
+	// 处理所有路由
+	webRouter.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
+
+		// 移除开头的 /
+		if len(path) > 0 && path[0] == '/' {
+			path = path[1:]
+		}
+
+		// 根路径
+		if path == "" {
+			path = "index.html"
+		}
+
+		// 尝试读取文件
+		data, err := fs.ReadFile(webRoot, path)
+		if err == nil {
+			// 根据扩展名设置 Content-Type
+			contentType := getContentType(path)
+			c.Data(200, contentType, data)
+			return
+		}
+
+		// 尝试 .html 文件
+		data, err = fs.ReadFile(webRoot, path+".html")
+		if err == nil {
+			c.Data(200, "text/html; charset=utf-8", data)
+			return
+		}
+
+		// 尝试 index.html
+		data, err = fs.ReadFile(webRoot, path+"/index.html")
+		if err == nil {
+			c.Data(200, "text/html; charset=utf-8", data)
+			return
+		}
+
+		// SPA 路由 - 返回 index.html
+		if !containsDot(path) {
+			data, err = fs.ReadFile(webRoot, "index.html")
+			if err == nil {
+				c.Data(200, "text/html; charset=utf-8", data)
+				return
+			}
+		}
+
+		// 404
+		c.Status(404)
+	})
+
+	// 启动 Web 服务器
+	go func() {
+		addr := fmt.Sprintf(":%d", port)
+		log.Printf("Web server starting on http://localhost%s", addr)
+		if err := webRouter.Run(addr); err != nil {
+			log.Fatalf("Failed to start web server: %v", err)
+		}
+	}()
+}
+
+// getContentType 根据文件扩展名返回 Content-Type
+func getContentType(path string) string {
+	if len(path) < 4 {
+		return "application/octet-stream"
+	}
+	
+	ext := ""
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == '.' {
+			ext = path[i:]
+			break
+		}
+		if path[i] == '/' {
+			break
+		}
+	}
+	
+	switch ext {
+	case ".html":
+		return "text/html; charset=utf-8"
+	case ".css":
+		return "text/css; charset=utf-8"
+	case ".js":
+		return "application/javascript; charset=utf-8"
+	case ".json":
+		return "application/json; charset=utf-8"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".gif":
+		return "image/gif"
+	case ".svg":
+		return "image/svg+xml"
+	case ".ico":
+		return "image/x-icon"
+	case ".woff":
+		return "font/woff"
+	case ".woff2":
+		return "font/woff2"
+	case ".ttf":
+		return "font/ttf"
+	case ".eot":
+		return "application/vnd.ms-fontobject"
+	default:
+		return "application/octet-stream"
+	}
+}
+
 func main() {
 	// 设置日志
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -28,6 +199,11 @@ func main() {
 	cfg, err := config.LoadConfig("./config/config.yaml")
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// 启动前端 Web 服务器（独立端口）
+	if cfg.Server.WebPort > 0 {
+		startWebServer(cfg.Server.WebPort)
 	}
 
 	// 初始化数据库
@@ -495,6 +671,12 @@ func main() {
 			c.JSON(200, stats)
 		})
 
+		// 统计接口 - 全局今日统计
+		admin.GET("/stats/global/today", func(c *gin.Context) {
+			stats := statsCollector.GetTodayGlobalStats()
+			c.JSON(200, stats)
+		})
+
 		// 统计接口 - 所有项目统计
 		admin.GET("/stats/projects", func(c *gin.Context) {
 			projectStats := statsCollector.GetAllProjectStats()
@@ -512,6 +694,26 @@ func main() {
 			stats := statsCollector.GetProjectStats(id)
 			if stats == nil {
 				c.JSON(404, gin.H{"error": "no stats found for this project"})
+				return
+			}
+			c.JSON(200, stats)
+		})
+
+		// 统计接口 - 单个项目今日统计
+		admin.GET("/stats/project/:project_id/today", func(c *gin.Context) {
+			projectID := c.Param("project_id")
+			var id int64
+			if _, err := fmt.Sscanf(projectID, "%d", &id); err != nil {
+				c.JSON(400, gin.H{"error": "invalid project_id"})
+				return
+			}
+			stats := statsCollector.GetTodayProjectStats(id)
+			if stats == nil {
+				c.JSON(200, gin.H{
+					"pv":          0,
+					"active_keys": 0,
+					"last_update": time.Now().Format(time.RFC3339),
+				})
 				return
 			}
 			c.JSON(200, stats)
@@ -555,13 +757,146 @@ func main() {
 			}
 			c.JSON(200, stats)
 		})
+
+		// 每日统计接口 - 获取指定日期的全局统计
+		admin.GET("/stats/daily/global", func(c *gin.Context) {
+			date := c.DefaultQuery("date", time.Now().Format("2006-01-02"))
+			stats, err := model.GetDailyStats(date, "global", 0, "")
+			if err != nil {
+				c.JSON(404, gin.H{"error": "no daily stats found"})
+				return
+			}
+			c.JSON(200, stats)
+		})
+
+		// 每日统计接口 - 获取指定日期范围的全局统计
+		admin.GET("/stats/daily/global/range", func(c *gin.Context) {
+			startDate := c.Query("start_date")
+			endDate := c.Query("end_date")
+			if startDate == "" || endDate == "" {
+				c.JSON(400, gin.H{"error": "start_date and end_date are required"})
+				return
+			}
+			stats, err := model.GetDailyStatsByDateRange(startDate, endDate, "global", 0, "")
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, stats)
+		})
+
+		// 每日统计接口 - 获取最近N天的全局统计
+		admin.GET("/stats/daily/global/latest", func(c *gin.Context) {
+			days := 30 // 默认30天
+			if daysStr := c.Query("days"); daysStr != "" {
+				if d, err := strconv.Atoi(daysStr); err == nil && d > 0 {
+					days = d
+				}
+			}
+			stats, err := model.GetLatestDailyStats(days, "global", 0, "")
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, stats)
+		})
+
+		// 每日统计接口 - 获取指定项目的每日统计
+		admin.GET("/stats/daily/project/:project_id", func(c *gin.Context) {
+			projectID := c.Param("project_id")
+			var id int64
+			if _, err := fmt.Sscanf(projectID, "%d", &id); err != nil {
+				c.JSON(400, gin.H{"error": "invalid project_id"})
+				return
+			}
+			
+			days := 30
+			if daysStr := c.Query("days"); daysStr != "" {
+				if d, err := strconv.Atoi(daysStr); err == nil && d > 0 {
+					days = d
+				}
+			}
+			
+			stats, err := model.GetLatestDailyStats(days, "project", id, "")
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, stats)
+		})
+
+		// 每日统计接口 - 获取指定分组的每日统计
+		admin.GET("/stats/daily/group/:group_id", func(c *gin.Context) {
+			groupID := c.Param("group_id")
+			var id int64
+			if _, err := fmt.Sscanf(groupID, "%d", &id); err != nil {
+				c.JSON(400, gin.H{"error": "invalid group_id"})
+				return
+			}
+			
+			days := 30
+			if daysStr := c.Query("days"); daysStr != "" {
+				if d, err := strconv.Atoi(daysStr); err == nil && d > 0 {
+					days = d
+				}
+			}
+			
+			stats, err := model.GetLatestDailyStats(days, "group", id, "")
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, stats)
+		})
+
+		// 每日统计接口 - 获取指定 API Key 的每日统计
+		admin.GET("/stats/daily/key/:app_key", func(c *gin.Context) {
+			appKey := c.Param("app_key")
+			
+			days := 30
+			if daysStr := c.Query("days"); daysStr != "" {
+				if d, err := strconv.Atoi(daysStr); err == nil && d > 0 {
+					days = d
+				}
+			}
+			
+			stats, err := model.GetLatestDailyStats(days, "key", 0, appKey)
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, stats)
+		})
+
+		// 每日统计接口 - 获取指定日期所有项目的统计
+		admin.GET("/stats/daily/projects", func(c *gin.Context) {
+			date := c.DefaultQuery("date", time.Now().Format("2006-01-02"))
+			stats, err := model.GetAllDailyStatsByDate(date, "project")
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, stats)
+		})
+
+		// 每日统计接口 - 获取指定日期所有分组的统计
+		admin.GET("/stats/daily/groups", func(c *gin.Context) {
+			date := c.DefaultQuery("date", time.Now().Format("2006-01-02"))
+			stats, err := model.GetAllDailyStatsByDate(date, "group")
+			if err != nil {
+				c.JSON(500, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(200, stats)
+		})
 	}
 
 	// 使用 NoRoute 处理所有其他请求（代理）
 	// 注意：需要排除 /__gproxy__/* 路径
 	r.NoRoute(func(c *gin.Context) {
-		// 如果是管理路径，返回 404（已经被上面的路由处理过了）
 		path := c.Request.URL.Path
+		
+		// 如果是管理路径，返回 404（已经被上面的路由处理过了）
 		if len(path) >= 11 && path[:11] == "/__gproxy__" {
 			c.JSON(404, gin.H{"error": "not found"})
 			return
@@ -585,7 +920,10 @@ func main() {
 
 	// 启动服务器
 	port := fmt.Sprintf(":%d", cfg.Server.Port)
-	log.Printf("Server starting on %s", port)
+	log.Printf("API server starting on http://localhost%s", port)
+	if cfg.Server.WebPort > 0 {
+		log.Printf("Web UI available at http://localhost:%d", cfg.Server.WebPort)
+	}
 
 	// 优雅关闭
 	go func() {

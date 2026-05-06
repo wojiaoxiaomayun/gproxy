@@ -12,7 +12,7 @@ export default function Navigation() {
   const links = [
     { href: '/', label: '仪表盘', icon: LayoutDashboard },
     { href: '/projects', label: '项目管理', icon: Package },
-    { href: '/logs', label: '日志查看', icon: FileText },
+    // { href: '/logs', label: '日志查看', icon: FileText }, // 暂时隐藏
   ]
 
   return (

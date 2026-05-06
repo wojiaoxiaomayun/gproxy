@@ -13,8 +13,9 @@ import (
 // Config 全局配置结构
 type Config struct {
 	Server struct {
-		Port int    `yaml:"port"`
-		Mode string `yaml:"mode"` // debug, release
+		Port    int    `yaml:"port"`
+		Mode    string `yaml:"mode"`     // debug, release
+		WebPort int    `yaml:"web_port"` // 前端静态文件服务端口
 	} `yaml:"server"`
 
 	Database struct {
@@ -89,6 +90,7 @@ func generateDefaultConfig(configPath string) error {
 	// Server 配置
 	defaultConfig.Server.Port = 8080
 	defaultConfig.Server.Mode = "release"
+	defaultConfig.Server.WebPort = 3000
 
 	// Database 配置
 	defaultConfig.Database.Path = "./data/gateway.db"

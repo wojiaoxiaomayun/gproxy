@@ -379,6 +379,91 @@ func GetAllLatestStatsByType(statsType string) ([]StatsRecord, error) {
 		`, statsType, statsType).Scan(&records).Error
 		return records, err
 	}
-	
 	return records, nil
+}
+
+// DailyStats 每日统计表
+type DailyStats struct {
+	ID             int64     `gorm:"primaryKey;autoIncrement" json:"id"`
+	StatDate       string    `gorm:"type:date;not null;uniqueIndex:idx_daily_unique,priority:1" json:"stat_date"` // 统计日期 YYYY-MM-DD
+	Type           string    `gorm:"type:text;not null;uniqueIndex:idx_daily_unique,priority:2;index" json:"type"` // global, project, group, key
+	RefID          int64     `gorm:"uniqueIndex:idx_daily_unique,priority:3;index" json:"ref_id"`                  // 关联ID
+	RefKey         string    `gorm:"type:text;uniqueIndex:idx_daily_unique,priority:4;index" json:"ref_key"`       // 关联Key
+	PV             int64     `gorm:"not null;default:0" json:"pv"`                                                 // 当日请求总数
+	ActiveKeyCount int       `gorm:"default:0" json:"active_key_count"`                                            // 当日活跃Key数量
+	CreatedAt      time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"created_at"`
+	UpdatedAt      time.Time `gorm:"default:CURRENT_TIMESTAMP" json:"updated_at"`
+}
+
+func (DailyStats) TableName() string {
+	return "daily_stats"
+}
+
+// SaveOrUpdateDailyStats 保存或更新每日统计（使用 UPSERT）
+func SaveOrUpdateDailyStats(stats *DailyStats) error {
+	// SQLite 使用 INSERT OR REPLACE
+	return DB.Exec(`
+		INSERT INTO daily_stats (stat_date, type, ref_id, ref_key, pv, active_key_count, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(stat_date, type, ref_id, ref_key) 
+		DO UPDATE SET 
+			pv = excluded.pv,
+			active_key_count = excluded.active_key_count,
+			updated_at = excluded.updated_at
+	`, stats.StatDate, stats.Type, stats.RefID, stats.RefKey, stats.PV, stats.ActiveKeyCount, stats.CreatedAt, stats.UpdatedAt).Error
+}
+
+// GetDailyStats 获取指定日期的统计
+func GetDailyStats(statDate string, statsType string, refID int64, refKey string) (*DailyStats, error) {
+	var stats DailyStats
+	query := DB.Where("stat_date = ? AND type = ?", statDate, statsType)
+	
+	if statsType == "project" || statsType == "group" {
+		query = query.Where("ref_id = ?", refID)
+	} else if statsType == "key" {
+		query = query.Where("ref_key = ?", refKey)
+	}
+	
+	err := query.First(&stats).Error
+	if err != nil {
+		return nil, err
+	}
+	return &stats, nil
+}
+
+// GetDailyStatsByDateRange 获取日期范围内的统计
+func GetDailyStatsByDateRange(startDate, endDate string, statsType string, refID int64, refKey string) ([]DailyStats, error) {
+	var stats []DailyStats
+	query := DB.Where("stat_date BETWEEN ? AND ? AND type = ?", startDate, endDate, statsType)
+	
+	if statsType == "project" || statsType == "group" {
+		query = query.Where("ref_id = ?", refID)
+	} else if statsType == "key" {
+		query = query.Where("ref_key = ?", refKey)
+	}
+	
+	err := query.Order("stat_date ASC").Find(&stats).Error
+	return stats, err
+}
+
+// GetAllDailyStatsByDate 获取指定日期所有类型的统计
+func GetAllDailyStatsByDate(statDate string, statsType string) ([]DailyStats, error) {
+	var stats []DailyStats
+	err := DB.Where("stat_date = ? AND type = ?", statDate, statsType).Order("ref_id ASC, ref_key ASC").Find(&stats).Error
+	return stats, err
+}
+
+// GetLatestDailyStats 获取最近N天的统计数据
+func GetLatestDailyStats(days int, statsType string, refID int64, refKey string) ([]DailyStats, error) {
+	var stats []DailyStats
+	query := DB.Where("type = ?", statsType)
+
+	if statsType == "project" || statsType == "group" {
+		query = query.Where("ref_id = ?", refID)
+	} else if statsType == "key" {
+		query = query.Where("ref_key = ?", refKey)
+	}
+
+	err := query.Order("stat_date DESC").Limit(days).Find(&stats).Error
+	return stats, err
 }

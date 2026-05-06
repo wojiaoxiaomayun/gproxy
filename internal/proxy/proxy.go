@@ -105,6 +105,7 @@ func (h *ProxyHandler) Handle(c *gin.Context) {
 	// 自定义响应处理
 	var statusCode int
 	var responseError string
+	var handledInErrorHandler bool // 标记是否在ErrorHandler中处理过
 	
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		statusCode = resp.StatusCode
@@ -116,11 +117,24 @@ func (h *ProxyHandler) Handle(c *gin.Context) {
 		log.Printf("Proxy error: %v", err)
 		responseError = err.Error()
 		statusCode = http.StatusBadGateway
+		handledInErrorHandler = true // 标记已处理
 		
 		// 记录失败
 		if cb != nil {
 			cb.(*breaker.CircuitBreaker).RecordFailure()
 		}
+		
+		// 计算耗时
+		costMs := time.Since(startTime).Milliseconds()
+		
+		// 收集统计（在日志之前，确保统计不会丢失）
+		if h.statsCollector != nil {
+			h.statsCollector.RecordRequest(projectID.(int64), groupID.(int64), appKey.(string))
+		}
+		
+		// 收集日志（错误情况）
+		h.collectLog(c, projectID.(int64), appKey.(string), groupID.(int64), 
+			requestBody, bodyHash, statusCode, costMs, responseError)
 		
 		w.WriteHeader(http.StatusBadGateway)
 		w.Write([]byte(fmt.Sprintf(`{"error": "proxy error: %v"}`, err)))
@@ -128,6 +142,11 @@ func (h *ProxyHandler) Handle(c *gin.Context) {
 
 	// 执行代理
 	proxy.ServeHTTP(c.Writer, c.Request)
+
+	// 如果已经在ErrorHandler中处理过，直接返回，避免重复统计
+	if handledInErrorHandler {
+		return
+	}
 
 	// 记录成功
 	if cb != nil && statusCode < 500 {
@@ -139,10 +158,10 @@ func (h *ProxyHandler) Handle(c *gin.Context) {
 
 	// 收集统计（在日志之前，确保统计不会丢失）
 	if h.statsCollector != nil {
-		h.statsCollector.Record(projectID.(int64), groupID.(int64), appKey.(string))
+		h.statsCollector.RecordRequest(projectID.(int64), groupID.(int64), appKey.(string))
 	}
 
-	// 收集日志
+	// 收集日志（成功情况）
 	h.collectLog(c, projectID.(int64), appKey.(string), groupID.(int64), 
 		requestBody, bodyHash, statusCode, costMs, responseError)
 }
@@ -151,14 +170,25 @@ func (h *ProxyHandler) Handle(c *gin.Context) {
 func (h *ProxyHandler) collectLog(c *gin.Context, projectID int64, appKey string, groupID int64,
 	requestBody []byte, bodyHash string, statusCode int, costMs int64, errorMsg string) {
 	
-	// 获取日志配置
+	// 获取日志配置（可选）
 	logConfig := h.configCache.GetLogConfig(projectID)
-	if logConfig == nil {
-		return // 没有配置日志策略，不记录
+	
+	// 默认配置：记录所有请求，不记录body
+	enableBody := false
+	bodyRecordThresholdMs := 500
+	maxBodySize := 2048
+	onlyError := false
+	
+	// 如果有配置，使用配置的值
+	if logConfig != nil {
+		enableBody = logConfig.EnableBody
+		bodyRecordThresholdMs = logConfig.BodyRecordThresholdMs
+		maxBodySize = logConfig.MaxBodySize
+		onlyError = logConfig.OnlyError
 	}
 
 	// 检查是否只记录错误
-	if logConfig.OnlyError && statusCode < 400 {
+	if onlyError && statusCode < 400 {
 		return
 	}
 
@@ -177,18 +207,17 @@ func (h *ProxyHandler) collectLog(c *gin.Context, projectID int64, appKey string
 		Error:     errorMsg,
 	}
 
-	// 处理body
-	if logConfig.EnableBody && len(requestBody) > 0 {
+	// 处理body（如果启用）
+	if enableBody && len(requestBody) > 0 {
 		// 检查是否超过阈值
-		if costMs >= int64(logConfig.BodyRecordThresholdMs) {
+		if costMs >= int64(bodyRecordThresholdMs) {
 			bodySize := len(requestBody)
 			logEntry.BodySize = bodySize
 			logEntry.BodyHash = bodyHash
 			
 			// 截取body预览
-			maxSize := logConfig.MaxBodySize
-			if bodySize > maxSize {
-				logEntry.BodyPreview = string(requestBody[:maxSize]) + "..."
+			if bodySize > maxBodySize {
+				logEntry.BodyPreview = string(requestBody[:maxBodySize]) + "..."
 			} else {
 				logEntry.BodyPreview = string(requestBody)
 			}

@@ -37,3 +37,11 @@ Thumbs.db
 config/config.yaml
 data
 logs
+
+node_modules/
+.next
+
+# 注意：web/out 需要被提交，因为会被嵌入到可执行文件中
+# 如果不想提交，可以取消下面的注释
+web/out
+web/node_modules

@@ -195,4 +195,58 @@ export const api = {
     }),
   deleteCircuitBreakerConfig: (groupId: number) =>
     request<void>(`/__gproxy__/admin/circuit-breaker-config/${groupId}`, { method: 'DELETE' }),
+
+  // Real-time Stats - 实时统计
+  getGlobalStats: () =>
+    request<{ pv: number; active_keys: number; last_update: string }>('/__gproxy__/admin/stats/global'),
+  
+  // 今日统计（从内存中获取，实时）
+  getTodayGlobalStats: () =>
+    request<{ pv: number; active_keys: number; last_update: string }>('/__gproxy__/admin/stats/global/today'),
+  
+  getTodayProjectStats: (projectId: number) =>
+    request<{ pv: number; active_keys: number; last_update: string }>(`/__gproxy__/admin/stats/project/${projectId}/today`),
+  
+  getProjectStats: (projectId: number) =>
+    request<{ pv: number; active_keys: number; last_update: string }>(`/__gproxy__/admin/stats/project/${projectId}`),
+  
+  getAllProjectStats: () =>
+    request<Record<string, { pv: number; active_keys: number; last_update: string }>>('/__gproxy__/admin/stats/projects'),
+  
+  getGroupStats: (groupId: number) =>
+    request<{ pv: number; active_keys: number; last_update: string }>(`/__gproxy__/admin/stats/group/${groupId}`),
+  
+  getAllGroupStats: () =>
+    request<Record<string, { pv: number; active_keys: number; last_update: string }>>('/__gproxy__/admin/stats/groups'),
+  
+  getKeyStats: (appKey: string) =>
+    request<{ pv: number; last_update: string }>(`/__gproxy__/admin/stats/key/${appKey}`),
+  
+  getAllKeyStats: () =>
+    request<Record<string, { pv: number; last_update: string }>>('/__gproxy__/admin/stats/keys'),
+
+  // Daily Stats - 每日统计
+  getDailyGlobalStats: (days: number = 30) =>
+    request<any[]>(`/__gproxy__/admin/stats/daily/global/latest?days=${days}`),
+  
+  getDailyProjectStats: (projectId: string, days: number = 30) =>
+    request<any[]>(`/__gproxy__/admin/stats/daily/project/${projectId}?days=${days}`),
+  
+  getDailyGroupStats: (groupId: string, days: number = 30) =>
+    request<any[]>(`/__gproxy__/admin/stats/daily/group/${groupId}?days=${days}`),
+  
+  getDailyKeyStats: (appKey: string, days: number = 30) =>
+    request<any[]>(`/__gproxy__/admin/stats/daily/key/${appKey}?days=${days}`),
+  
+  getDailyGlobalStatsByDate: (date: string) =>
+    request<any>(`/__gproxy__/admin/stats/daily/global?date=${date}`),
+  
+  getDailyGlobalStatsByRange: (startDate: string, endDate: string) =>
+    request<any[]>(`/__gproxy__/admin/stats/daily/global/range?start_date=${startDate}&end_date=${endDate}`),
+  
+  getAllDailyProjectStats: (date: string) =>
+    request<any[]>(`/__gproxy__/admin/stats/daily/projects?date=${date}`),
+  
+  getAllDailyGroupStats: (date: string) =>
+    request<any[]>(`/__gproxy__/admin/stats/daily/groups?date=${date}`),
 }
