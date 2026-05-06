@@ -82,8 +82,18 @@ function ProjectDetailView({ projectId, onBack }: { projectId: number; onBack: (
     only_error: 0,
   })
 
+  const [todayPV, setTodayPV] = useState(0)
+
   useEffect(() => {
     loadProjectData()
+    loadTodayStats()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId])
+
+  useEffect(() => {
+    // 每30秒刷新一次今日统计
+    const interval = setInterval(loadTodayStats, 30000)
+    return () => clearInterval(interval)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId])
 
@@ -142,6 +152,15 @@ function ProjectDetailView({ projectId, onBack }: { projectId: number; onBack: (
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  const loadTodayStats = async () => {
+    try {
+      const stats = await api.getTodayProjectStats(projectId)
+      setTodayPV(stats.pv)
+    } catch (error) {
+      console.error('加载今日统计失败:', error)
     }
   }
 
@@ -635,7 +654,7 @@ function ProjectDetailView({ projectId, onBack }: { projectId: number; onBack: (
                 <Activity className="h-4 w-4" />
                 今日请求
               </CardDescription>
-              <CardTitle className="text-2xl">-</CardTitle>
+              <CardTitle className="text-2xl">{todayPV.toLocaleString()}</CardTitle>
             </CardHeader>
           </Card>
           <Card className="border-slate-200 dark:border-slate-800">
@@ -1067,19 +1086,21 @@ function ProjectDetailView({ projectId, onBack }: { projectId: number; onBack: (
                 <Field>
                   <FieldLabel>分组</FieldLabel>
                   <Select
-                    value={apiKeyForm.group_id.toString()}
+                    value={groups.find(g => g.id === apiKeyForm.group_id)}
                     onValueChange={(value) => {
-                      if (value) {
-                        setApiKeyForm({ ...apiKeyForm, group_id: parseInt(value) })
+                      if (value && typeof value === 'object' && 'id' in value) {
+                        setApiKeyForm({ ...apiKeyForm, group_id: value.id })
                       }
                     }}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="选择分组" />
+                      <SelectValue placeholder="选择分组">
+                        {(value) => value && typeof value === 'object' && 'name' in value ? value.name : '选择分组'}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectPopup>
                       {groups.map((group) => (
-                        <SelectItem key={group.id} value={group.id.toString()}>
+                        <SelectItem key={group.id} value={group}>
                           {group.name}
                         </SelectItem>
                       ))}
@@ -1122,19 +1143,21 @@ function ProjectDetailView({ projectId, onBack }: { projectId: number; onBack: (
                 <Field>
                   <FieldLabel>分组</FieldLabel>
                   <Select
-                    value={apiKeyForm.group_id.toString()}
+                    value={groups.find(g => g.id === apiKeyForm.group_id)}
                     onValueChange={(value) => {
-                      if (value) {
-                        setApiKeyForm({ ...apiKeyForm, group_id: parseInt(value) })
+                      if (value && typeof value === 'object' && 'id' in value) {
+                        setApiKeyForm({ ...apiKeyForm, group_id: value.id })
                       }
                     }}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="选择分组" />
+                      <SelectValue placeholder="选择分组">
+                        {(value) => value && typeof value === 'object' && 'name' in value ? value.name : '选择分组'}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectPopup>
                       {groups.map((group) => (
-                        <SelectItem key={group.id} value={group.id.toString()}>
+                        <SelectItem key={group.id} value={group}>
                           {group.name}
                         </SelectItem>
                       ))}
@@ -1277,7 +1300,9 @@ function ProjectDetailView({ projectId, onBack }: { projectId: number; onBack: (
                     }}
                   >
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue>
+                        {rateLimitForm.mode === 'simple' ? '简单模式 (仅 QPS)' : '多窗口模式 (QPS + RPM + RPH)'}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectPopup>
                       <SelectItem value="simple">简单模式 (仅 QPS)</SelectItem>
@@ -1385,7 +1410,7 @@ function ProjectDetailView({ projectId, onBack }: { projectId: number; onBack: (
   )
 }
 
-// 内部组件：项目列表页面
+// 内部组件:项目列表页面
 function ProjectsListPage() {
   const router = useRouter()
   const [projects, setProjects] = useState<Project[]>([])
@@ -1394,6 +1419,7 @@ function ProjectsListPage() {
   const [creating, setCreating] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [projectToDelete, setProjectToDelete] = useState<number | null>(null)
+  const [todayPV, setTodayPV] = useState(0)
   const [formData, setFormData] = useState({
     name: '',
     description: ''
@@ -1401,7 +1427,20 @@ function ProjectsListPage() {
 
   useEffect(() => {
     loadProjects()
+    loadTodayStats()
+    // 每30秒刷新一次今日统计
+    const interval = setInterval(loadTodayStats, 30000)
+    return () => clearInterval(interval)
   }, [])
+
+  const loadTodayStats = async () => {
+    try {
+      const stats = await api.getTodayGlobalStats()
+      setTodayPV(stats.pv)
+    } catch (error) {
+      console.error('加载今日统计失败:', error)
+    }
+  }
 
   const loadProjects = async () => {
     try {
@@ -1523,7 +1562,7 @@ function ProjectsListPage() {
           <Card className="border-slate-200 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow">
             <CardHeader className="pb-3">
               <CardDescription>今日请求</CardDescription>
-              <CardTitle className="text-2xl">8,234</CardTitle>
+              <CardTitle className="text-2xl">{todayPV.toLocaleString()}</CardTitle>
             </CardHeader>
           </Card>
         </div>

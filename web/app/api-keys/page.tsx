@@ -343,20 +343,21 @@ export default function ApiKeysPage() {
                     <Field>
                       <FieldLabel>项目</FieldLabel>
                       <Select
-                        value={formData.project_id.toString()}
+                        value={projects.find(p => p.id === formData.project_id)}
                         onValueChange={(value) => {
-                          if (value) {
-                            const projectId = parseInt(value)
-                            setFormData({ ...formData, project_id: projectId })
+                          if (value && typeof value === 'object' && 'id' in value) {
+                            setFormData({ ...formData, project_id: value.id })
                           }
                         }}
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="选择项目" />
+                          <SelectValue placeholder="选择项目">
+                            {(value) => value && typeof value === 'object' && 'name' in value ? value.name : '选择项目'}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectPopup>
                           {projects.map((project) => (
-                            <SelectItem key={project.id} value={project.id.toString()}>
+                            <SelectItem key={project.id} value={project}>
                               {project.name}
                             </SelectItem>
                           ))}
@@ -366,20 +367,21 @@ export default function ApiKeysPage() {
                     <Field>
                       <FieldLabel>分组</FieldLabel>
                       <Select
-                        value={formData.group_id.toString()}
+                        value={groups.find(g => g.id === formData.group_id)}
                         onValueChange={(value) => {
-                          if (value) {
-                            const groupId = parseInt(value)
-                            setFormData({ ...formData, group_id: groupId })
+                          if (value && typeof value === 'object' && 'id' in value) {
+                            setFormData({ ...formData, group_id: value.id })
                           }
                         }}
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="选择分组" />
+                          <SelectValue placeholder="选择分组">
+                            {(value) => value && typeof value === 'object' && 'name' in value ? value.name : '选择分组'}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectPopup>
                           {groups.map((group) => (
-                            <SelectItem key={group.id} value={group.id.toString()}>
+                            <SelectItem key={group.id} value={group}>
                               {group.name}
                             </SelectItem>
                           ))}

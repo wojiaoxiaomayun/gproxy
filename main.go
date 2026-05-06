@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +27,11 @@ import (
 //go:embed web/out/*
 var webFS embed.FS
 
+// isDev 检测是否为开发模式（使用 go run 运行）
+func isDev() bool {
+	return strings.Contains(os.Args[0], "go-build")
+}
+
 // containsDot 检查路径是否包含点（用于判断是否是文件请求）
 func containsDot(path string) bool {
 	for i := len(path) - 1; i >= 0; i-- {
@@ -41,7 +47,21 @@ func containsDot(path string) bool {
 
 // startWebServer 启动前端静态文件服务器（使用嵌入的文件系统）
 func startWebServer(port int) {
+	// 开发模式下不启动 embed 静态服务器
+	if isDev() {
+		log.Println("Development mode detected (go run), skipping embedded web server")
+		return
+	}
+
 	log.Printf("Starting embedded web server on port %d", port)
+
+	// 获取嵌入的文件系统，去掉 "web/out" 前缀
+	webRoot, err := fs.Sub(webFS, "web/out")
+	if err != nil {
+		log.Printf("Failed to get embedded web filesystem: %v", err)
+		log.Println("Web server will not start")
+		return
+	}
 
 	// 创建独立的 Gin 实例用于前端
 	gin.SetMode(gin.ReleaseMode)
@@ -59,14 +79,6 @@ func startWebServer(port int) {
 		}
 		c.Next()
 	})
-
-	// 获取嵌入的文件系统，去掉 "web/out" 前缀
-	webRoot, err := fs.Sub(webFS, "web/out")
-	if err != nil {
-		log.Printf("Failed to get embedded web filesystem: %v", err)
-		log.Println("Web server will not start")
-		return
-	}
 
 	// 静态资源
 	webRouter.StaticFS("/_next", http.FS(webRoot))

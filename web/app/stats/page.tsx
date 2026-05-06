@@ -303,13 +303,18 @@ export default function StatsPage() {
               <CardDescription>查看指定项目的统计数据</CardDescription>
             </CardHeader>
             <CardContent>
-              <Select value={selectedProject} onValueChange={(v) => v && setSelectedProject(v)}>
+              <Select 
+                value={projects.find(p => p.id.toString() === selectedProject)}
+                onValueChange={(v) => v && typeof v === 'object' && 'id' in v && setSelectedProject(v.id.toString())}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="选择项目" />
+                  <SelectValue placeholder="选择项目">
+                    {(value) => value && typeof value === 'object' && 'name' in value ? value.name : '选择项目'}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {projects.map((project) => (
-                    <SelectItem key={project.id} value={project.id.toString()}>
+                    <SelectItem key={project.id} value={project}>
                       {project.name}
                     </SelectItem>
                   ))}
@@ -397,13 +402,18 @@ export default function StatsPage() {
               <CardDescription>查看指定分组的统计数据</CardDescription>
             </CardHeader>
             <CardContent>
-              <Select value={selectedGroup} onValueChange={(v) => v && setSelectedGroup(v)}>
+              <Select 
+                value={groups.find(g => g.id.toString() === selectedGroup)}
+                onValueChange={(v) => v && typeof v === 'object' && 'id' in v && setSelectedGroup(v.id.toString())}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="选择分组" />
+                  <SelectValue placeholder="选择分组">
+                    {(value) => value && typeof value === 'object' && 'name' in value ? value.name : '选择分组'}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {groups.map((group) => (
-                    <SelectItem key={group.id} value={group.id.toString()}>
+                    <SelectItem key={group.id} value={group}>
                       {group.name}
                     </SelectItem>
                   ))}
@@ -491,13 +501,18 @@ export default function StatsPage() {
               <CardDescription>查看指定 API Key 的统计数据</CardDescription>
             </CardHeader>
             <CardContent>
-              <Select value={selectedKey} onValueChange={(v) => v && setSelectedKey(v)}>
+              <Select 
+                value={apiKeys.find(k => k.app_key === selectedKey)}
+                onValueChange={(v) => v && typeof v === 'object' && 'app_key' in v && setSelectedKey(v.app_key)}
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="选择 API Key" />
+                  <SelectValue placeholder="选择 API Key">
+                    {(value) => value && typeof value === 'object' && 'name' in value ? (value.name || value.app_key) : '选择 API Key'}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {apiKeys.map((key) => (
-                    <SelectItem key={key.id} value={key.app_key}>
+                    <SelectItem key={key.id} value={key}>
                       {key.name || key.app_key}
                     </SelectItem>
                   ))}
