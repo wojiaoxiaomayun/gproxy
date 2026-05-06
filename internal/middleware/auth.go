@@ -11,27 +11,15 @@ import (
 // AuthMiddleware API Key鉴权中间件
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 从Header提取API Key (Authorization: Bearer <token>)
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
+		// 从Header提取API Key (X-Validate-Key: <token>)
+		apiKey := c.GetHeader("X-Validate-Key")
+		if apiKey == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "missing Authorization header",
+				"error": "missing X-Validate-Key header",
 			})
 			c.Abort()
 			return
 		}
-
-		// 解析 Bearer token
-		const prefix = "Bearer "
-		if len(authHeader) < len(prefix) || authHeader[:len(prefix)] != prefix {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "invalid Authorization header format, expected: Bearer <token>",
-			})
-			c.Abort()
-			return
-		}
-
-		apiKey := authHeader[len(prefix):]
 
 		// 从缓存查找API Key配置
 		configCache := cache.GetGlobalCache()
